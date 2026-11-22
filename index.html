@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ollama Local Models & Benchmarks (Late 2026)</title>
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+          },
+          colors: {
+            slate: {
+              950: '#090d16',
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased selection:bg-sky-500/30 selection:text-sky-200 min-h-screen">
+
+  <!-- Subtle background ambient glow -->
+  <div class="fixed inset-0 pointer-events-none overflow-hidden -z-10">
+    <div class="absolute -top-40 left-1/4 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl"></div>
+    <div class="absolute top-20 right-1/4 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl"></div>
+  </div>
+
+  <!-- Main Container -->
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-8">
+
+    <!-- 1. Header & VRAM / Task Filter Bar -->
+    <header class="space-y-6">
+      <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+        <div class="space-y-2">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-800 text-xs font-medium text-emerald-400">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Late 2026 Verified Local Benchmark Dataset
+          </div>
+          <h1 class="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight text-white">
+            Ollama Local Models &amp; Benchmark Explorer <span class="text-slate-400 font-semibold">(Late 2026)</span>
+          </h1>
+          <p class="text-sm sm:text-base text-slate-400 max-w-3xl">
+            Compare download footprint (Q4), VRAM tiers, and published benchmarks to plan your next local model upgrade.
+          </p>
+        </div>
+
+        <!-- Quick Stats Pill -->
+        <div class="flex items-center gap-3 self-start lg:self-end">
+          <div class="px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 text-right">
+            <div class="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">Showing Models</div>
+            <div id="visible-count" class="text-lg font-bold text-white tabular-nums">13 / 13</div>
+          </div>
+          <button
+            id="reset-filters-btn"
+            type="button"
+            class="px-3.5 py-2.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-xs font-medium text-slate-300 hover:text-white transition-colors"
+            title="Reset all active filters"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
+      <!-- Filter Controls Card -->
+      <div class="p-4 sm:p-5 rounded-2xl bg-slate-900/80 border border-slate-800/90 backdrop-blur space-y-4">
+        <!-- VRAM Tier Filter Pills -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-4">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0 w-24">VRAM Tier</span>
+          <div id="vram-filter-bar" class="flex flex-wrap gap-2" role="group" aria-label="Filter by VRAM tier">
+            <!-- Buttons populated/bound by JS -->
+          </div>
+        </div>
+
+        <div class="border-t border-slate-800/80"></div>
+
+        <!-- Task Filter Pills -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-4">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 shrink-0 w-24">Task Focus</span>
+          <div id="task-filter-bar" class="flex flex-wrap gap-2" role="group" aria-label="Filter by primary task">
+            <!-- Buttons populated/bound by JS -->
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 2. Interactive Chart 1: Performance vs. Download Size (Scatter / Bubble) -->
+    <section class="rounded-2xl bg-slate-900/80 border border-slate-800/90 p-4 sm:p-6 shadow-xl shadow-black/20 space-y-5">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div class="space-y-1">
+          <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+            <span>Performance vs. Download Size</span>
+            <span id="scatter-metric-badge" class="text-xs font-medium px-2.5 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30">LiveCodeBench v6</span>
+          </h2>
+          <p class="text-xs sm:text-sm text-slate-400">
+            Plot of verified benchmark scores against Q4_K_M / MXFP4 download size (GB). Only models with published scores for the selected metric are plotted.
+          </p>
+        </div>
+
+        <!-- Family Legend -->
+        <div class="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>Gemma 4
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800">
+            <span class="w-2.5 h-2.5 rounded-full bg-sky-400"></span>Qwen 3 / 3.6 / 3.8
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800">
+            <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>DeepSeek R1
+          </span>
+          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 border border-slate-800">
+            <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>Mistral Devstral
+          </span>
+        </div>
+      </div>
+
+      <!-- Metric Switcher Tabs -->
+      <div id="metric-tabs" class="flex flex-wrap gap-2 p-1.5 rounded-xl bg-slate-950/80 border border-slate-800/80" role="tablist" aria-label="Select benchmark metric">
+        <!-- Tabs rendered by JS -->
+      </div>
+
+      <!-- Scatter Chart Canvas Wrapper -->
+      <div class="relative w-full h-[340px] sm:h-[420px]">
+        <canvas id="scatterChart"></canvas>
+        <!-- Empty state overlay when current filters exclude all scored models -->
+        <div id="scatter-empty" class="hidden absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 rounded-xl border border-dashed border-slate-800 text-center p-6">
+          <p class="text-sm font-semibold text-slate-200">No models in the active filter have a published score for this benchmark.</p>
+          <p class="text-xs text-slate-400 mt-1">Try switching the benchmark tab above or resetting the VRAM/Task filters.</p>
+          <button type="button" onclick="resetAllFilters()" class="mt-3 px-3.5 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 text-xs font-medium transition-colors">
+            Show All Models
+          </button>
+        </div>
+      </div>
+
+      <!-- VRAM Ceiling Legend Note -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80 text-xs text-slate-400">
+        <div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-4 border-t border-dashed border-emerald-400/70"></span>
+            <span><strong class="text-slate-300">6 GB</strong> (~8 GB VRAM ceiling)</span>
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-4 border-t border-dashed border-sky-400/70"></span>
+            <span><strong class="text-slate-300">14 GB</strong> (~16 GB VRAM ceiling)</span>
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-4 border-t border-dashed border-amber-400/70"></span>
+            <span><strong class="text-slate-300">20 GB</strong> (~24 GB VRAM ceiling)</span>
+          </span>
+        </div>
+        <span class="text-slate-500">Dashed lines reserve ~2–4 GB VRAM headroom for KV cache &amp; runtime overhead.</span>
+      </div>
+    </section>
+
+    <!-- 3. Interactive Chart 2: Multi-Benchmark Tier Jump (Grouped Bar Chart) -->
+    <section class="rounded-2xl bg-slate-900/80 border border-slate-800/90 p-4 sm:p-6 shadow-xl shadow-black/20 space-y-5">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div class="space-y-1">
+          <h2 class="text-lg sm:text-xl font-bold text-white">Multi-Benchmark Tier Jump</h2>
+          <p class="text-xs sm:text-sm text-slate-400">
+            Side-by-side comparison of key local upgrade steps across MMLU-Pro, GPQA Diamond, and LiveCodeBench v6. Missing bars indicate unpublished scores.
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 text-xs text-slate-300 shrink-0">
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-emerald-500"></span>MMLU-Pro
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-sky-400"></span>GPQA Diamond
+          </span>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="w-3 h-3 rounded bg-purple-500"></span>LiveCodeBench v6
+          </span>
+        </div>
+      </div>
+
+      <div class="relative w-full h-[320px] sm:h-[380px]">
+        <canvas id="barChart"></canvas>
+      </div>
+    </section>
+
+    <!-- 4. Detailed Model Table & One-Click Pull Commands -->
+    <section class="rounded-2xl bg-slate-900/80 border border-slate-800/90 shadow-xl shadow-black/20 overflow-hidden">
+      <div class="p-4 sm:p-6 border-b border-slate-800/90 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div class="space-y-1">
+          <h2 class="text-lg sm:text-xl font-bold text-white">Detailed Model Catalog &amp; One-Click Pull Commands</h2>
+          <p class="text-xs sm:text-sm text-slate-400">
+            Click any command button to copy <code class="font-mono text-sky-300 bg-slate-950 px-1.5 py-0.5 rounded">ollama pull &lt;tag&gt;</code> to your clipboard.
+          </p>
+        </div>
+
+        <!-- Search Input -->
+        <div class="relative w-full sm:w-64">
+          <svg class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35m0 0A7.5 7.5 0 105.65 5.65a7.5 7.5 0 0011 11z" />
+          </svg>
+          <input
+            id="model-search"
+            type="text"
+            placeholder="Search tag, family, feature..."
+            class="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-950 border border-slate-800 focus:border-sky-500 focus:outline-none text-xs sm:text-sm text-slate-200 placeholder-slate-500 transition-colors"
+          />
+        </div>
+      </div>
+
+      <!-- Responsive Scrollable Table -->
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse min-w-[1020px]">
+          <thead>
+            <tr class="bg-slate-950/70 border-b border-slate-800 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              <th class="py-3.5 px-4">Model Tag &amp; Pull</th>
+              <th class="py-3.5 px-4">Family &amp; Arch</th>
+              <th class="py-3.5 px-4">Q4 Size &amp; Min VRAM</th>
+              <th class="py-3.5 px-4">Context</th>
+              <th class="py-3.5 px-4">Modalities / Features</th>
+              <th class="py-3.5 px-4">Verified Benchmarks</th>
+              <th class="py-3.5 px-4">Best For</th>
+            </tr>
+          </thead>
+          <tbody id="model-table-body" class="divide-y divide-slate-800/70 text-sm">
+            <!-- Rows injected via JS -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty Table State -->
+      <div id="table-empty" class="hidden p-10 text-center space-y-2">
+        <p class="text-sm font-semibold text-slate-300">No models match your current filter combination.</p>
+        <button type="button" onclick="resetAllFilters()" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-white transition-colors">
+          Clear All Filters
+        </button>
+      </div>
+    </section>
+
+    <!-- 5. KV Cache & Hardware Sizing Callout Box -->
+    <section class="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/40 border border-sky-500/25 p-5 sm:p-6 shadow-xl shadow-black/20">
+      <div class="flex flex-col lg:flex-row gap-5 lg:items-start lg:justify-between">
+        <div class="space-y-3 max-w-3xl">
+          <div class="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-sky-400">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            KV Cache &amp; Hardware Sizing Guide
+          </div>
+          <h3 class="text-lg font-bold text-white">Total VRAM = Q4 Model Weights + KV Cache</h3>
+          <p class="text-sm text-slate-300 leading-relaxed">
+            A model's Q4 download size only accounts for static weights. At runtime, Ollama allocates additional VRAM for the
+            <strong class="text-white">KV cache</strong>: typically <strong class="text-emerald-300">2–6 GB</strong> at short context lengths, scaling up to
+            <strong class="text-amber-300">10+ GB at 64K context</strong> for standard full-attention architectures. By contrast, hybrid linear-attention models such as
+            <code class="font-mono text-sky-300 bg-slate-950/90 px-1.5 py-0.5 rounded text-xs">qwen3.8:27b</code>
+            keep memory growth dramatically lower—requiring only <strong class="text-sky-300">~4.3 GB KV cache at 64K context</strong>.
+          </p>
+        </div>
+
+        <!-- Verification Tip Box -->
+        <div class="lg:w-80 shrink-0 rounded-xl bg-slate-950/80 border border-slate-800 p-4 space-y-2.5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-emerald-400">Verify 100% GPU Offload</div>
+          <p class="text-xs text-slate-400 leading-relaxed">
+            After loading a model, check the <code class="font-mono text-slate-200">PROCESSOR</code> column to confirm <strong class="text-white">100% GPU</strong> (no slow CPU/RAM spill):
+          </p>
+          <div class="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-slate-900 border border-slate-800">
+            <code class="font-mono text-xs text-emerald-300">ollama ps</code>
+            <button
+              type="button"
+              onclick="copyCommand('ollama ps', this)"
+              class="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 transition-colors"
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="text-center text-xs text-slate-500 pb-4">
+      Ollama Local Models &amp; Benchmark Explorer (Late 2026) &bull; Benchmark figures reflect published Q4/reference scores; unpublished metrics are omitted cleanly.
+    </footer>
+  </div>
+
+  <!-- Toast Notification (No alert() used) -->
+  <div
+    id="toast"
+    role="status"
+    aria-live="polite"
+    class="fixed bottom-5 right-5 z-50 translate-y-4 opacity-0 pointer-events-none transition-all duration-200 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-slate-900 border border-emerald-500/40 text-sm text-white shadow-2xl shadow-black/50"
+  >
+    <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+    <span id="toast-message" class="font-mono text-xs">Copied to clipboard</span>
+  </div>
+
+  <script>
+    /**
+     * Exact verified Late 2026 Ollama local models dataset.
+     * Null values represent unpublished benchmarks and are omitted cleanly in charts.
+     */
+    const MODELS = [
+      {
+        tag: 'gemma4:e4b',
+        family: 'Gemma 4',
+        familyKey: 'gemma',
+        arch: '4.5B eff. (8B emb)',
+        sizeGB: 5.2,
+        minVram: '8 GB VRAM',
+        vramTier: '8gb',
+        context: '128K',
+        modalities: 'Text, Image, Audio',
+        tasks: ['multimodal'],
+        scores: {
+          lcb: 52.0,
+          gpqa: null,
+          mmluPro: 69.4,
+          aime: null,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB v6',
+        },
+        verifiedSummary: 'MMLU-Pro: 69.4%, LCB v6: 52.0%',
+        bestFor: 'Fast multimodal baseline',
+      },
+      {
+        tag: 'qwen3:8b',
+        family: 'Qwen 3',
+        familyKey: 'qwen',
+        arch: '8.2B Dense',
+        sizeGB: 5.2,
+        minVram: '8 GB VRAM',
+        vramTier: '8gb',
+        context: '128K',
+        modalities: 'Thinking, Tools',
+        tasks: ['coding', 'reasoning'],
+        scores: {
+          lcb: 50.1,
+          gpqa: 59.7,
+          mmluPro: 72.1,
+          aime: 66.2,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB v6',
+          aime: 'AIME25',
+        },
+        verifiedSummary: 'MMLU-Pro: 72.1%, GPQA: 59.7%, LCB v6: 50.1%, AIME25: 66.2%',
+        bestFor: 'Compact coding & tool-calling baseline',
+      },
+      {
+        tag: 'deepseek-r1:8b',
+        family: 'DeepSeek R1',
+        familyKey: 'deepseek',
+        arch: '8B Dense Distill',
+        sizeGB: 5.2,
+        minVram: '8 GB VRAM',
+        vramTier: '8gb',
+        context: '128K',
+        modalities: 'Chain-of-Thought',
+        tasks: ['reasoning'],
+        scores: {
+          lcb: 37.6,
+          gpqa: 49.1,
+          mmluPro: null,
+          aime: null,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB',
+        },
+        verifiedSummary: 'GPQA: 49.1%, LCB: 37.6%',
+        bestFor: 'Entry-level step-by-step reasoning',
+      },
+      {
+        tag: 'gemma4:12b',
+        family: 'Gemma 4',
+        familyKey: 'gemma',
+        arch: '12B Unified Dense',
+        sizeGB: 7.6,
+        minVram: '12–16 GB VRAM',
+        vramTier: '12-16gb',
+        context: '256K',
+        modalities: 'Text, Image, Audio, Tools',
+        tasks: ['multimodal', 'reasoning', 'coding'],
+        scores: {
+          lcb: 72.0,
+          gpqa: 78.8,
+          mmluPro: 77.2,
+          aime: 77.5,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB v6',
+          aime: 'AIME26',
+        },
+        verifiedSummary: 'MMLU-Pro: 77.2%, GPQA: 78.8%, LCB v6: 72.0%, AIME26: 77.5%',
+        bestFor: 'Best mid-range all-rounder & multimodal jump',
+      },
+      {
+        tag: 'deepseek-r1:14b',
+        family: 'DeepSeek R1',
+        familyKey: 'deepseek',
+        arch: '14.8B Dense Distill',
+        sizeGB: 9.0,
+        minVram: '12–16 GB VRAM',
+        vramTier: '12-16gb',
+        context: '128K',
+        modalities: 'Chain-of-Thought',
+        tasks: ['reasoning', 'coding'],
+        scores: {
+          lcb: 53.1,
+          gpqa: 59.1,
+          mmluPro: null,
+          aime: 69.7,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB',
+          aime: 'AIME24',
+        },
+        verifiedSummary: 'GPQA: 59.1%, LCB: 53.1%, AIME24: 69.7%',
+        bestFor: 'Mid-range math & debugging reasoning',
+      },
+      {
+        tag: 'gpt-oss:20b',
+        family: 'OpenAI OSS',
+        familyKey: 'openai',
+        arch: '20.9B MoE (MXFP4)',
+        sizeGB: 14.0,
+        minVram: '16 GB RAM/VRAM',
+        vramTier: '12-16gb',
+        context: '128K',
+        modalities: 'Adjustable Reasoning Effort, Tools',
+        tasks: ['reasoning', 'coding'],
+        scores: {
+          lcb: null,
+          gpqa: null,
+          mmluPro: null,
+          aime: null,
+          swe: null,
+        },
+        scoreNotes: {},
+        verifiedSummary: '— (adjustable low/med/high)',
+        bestFor: 'Runs on 16 GB RAM; flexible reasoning',
+      },
+      {
+        tag: 'devstral:24b',
+        family: 'Mistral',
+        familyKey: 'mistral',
+        arch: '24B Dense',
+        sizeGB: 14.0,
+        minVram: '24 GB VRAM',
+        vramTier: '12-16gb',
+        context: '128K',
+        modalities: 'Agentic Coding, Tools',
+        tasks: ['coding'],
+        scores: {
+          lcb: null,
+          gpqa: null,
+          mmluPro: null,
+          aime: null,
+          swe: 46.8,
+        },
+        scoreNotes: {
+          swe: 'SWE-Bench Verified',
+        },
+        verifiedSummary: 'SWE-Bench Verified: 46.8%',
+        bestFor: 'Benchmarked local coding agent',
+      },
+      {
+        tag: 'gemma4:26b',
+        family: 'Gemma 4',
+        familyKey: 'gemma',
+        arch: '25.2B MoE (3.8B active)',
+        sizeGB: 16.0,
+        minVram: '24 GB VRAM',
+        vramTier: '24gb',
+        context: '256K',
+        modalities: 'Text, Image, Tools',
+        tasks: ['multimodal', 'reasoning', 'coding'],
+        scores: {
+          lcb: 77.1,
+          gpqa: 82.3,
+          mmluPro: 82.6,
+          aime: 88.3,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB v6',
+          aime: 'AIME26',
+        },
+        verifiedSummary: 'MMLU-Pro: 82.6%, GPQA: 82.3%, LCB v6: 77.1%, AIME26: 88.3%',
+        bestFor: 'Best speed-to-quality value pick (MoE)',
+      },
+      {
+        tag: 'qwen3.8:27b',
+        family: 'Qwen 3.8',
+        familyKey: 'qwen',
+        arch: '27B Dense (75% Linear Attn)',
+        sizeGB: 18.0,
+        minVram: '24 GB VRAM',
+        vramTier: '24gb',
+        context: '256K',
+        modalities: 'Vision, Tools, Thinking',
+        tasks: ['multimodal', 'coding', 'reasoning'],
+        scores: {
+          lcb: null,
+          gpqa: null,
+          mmluPro: null,
+          aime: null,
+          swe: null,
+        },
+        scoreNotes: {},
+        verifiedSummary: '— (Low KV-cache: ~4.3 GB @ 64K)',
+        bestFor: 'Top 24 GB VRAM general & agentic workhorse',
+      },
+      {
+        tag: 'qwen3-coder:30b',
+        family: 'Qwen 3 Coder',
+        familyKey: 'qwen',
+        arch: '30B MoE (3.3B active)',
+        sizeGB: 19.0,
+        minVram: '24–32 GB VRAM',
+        vramTier: '24gb',
+        context: '256K',
+        modalities: 'Coding RL, Tools',
+        tasks: ['coding'],
+        scores: {
+          lcb: null,
+          gpqa: null,
+          mmluPro: null,
+          aime: null,
+          swe: null,
+        },
+        scoreNotes: {},
+        verifiedSummary: '— (Fast MoE generation)',
+        bestFor: 'Top local coder for 24–32 GB GPUs',
+      },
+      {
+        tag: 'gemma4:31b',
+        family: 'Gemma 4',
+        familyKey: 'gemma',
+        arch: '30.7B Dense',
+        sizeGB: 20.0,
+        minVram: '24–32 GB VRAM',
+        vramTier: '24gb',
+        context: '256K',
+        modalities: 'Text, Image, Tools',
+        tasks: ['multimodal', 'reasoning', 'coding'],
+        scores: {
+          lcb: 80.0,
+          gpqa: 84.3,
+          mmluPro: 85.2,
+          aime: 89.2,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB v6',
+          aime: 'AIME26',
+        },
+        verifiedSummary: 'MMLU-Pro: 85.2%, GPQA: 84.3%, LCB v6: 80.0%, AIME26: 89.2%',
+        bestFor: 'Highest published dense benchmark scores under 24 GB',
+      },
+      {
+        tag: 'deepseek-r1:32b',
+        family: 'DeepSeek R1',
+        familyKey: 'deepseek',
+        arch: '32.8B Dense Distill',
+        sizeGB: 20.0,
+        minVram: '24–32 GB VRAM',
+        vramTier: '24gb',
+        context: '128K',
+        modalities: 'Chain-of-Thought',
+        tasks: ['reasoning'],
+        scores: {
+          lcb: 57.2,
+          gpqa: 62.1,
+          mmluPro: null,
+          aime: 72.6,
+          swe: null,
+        },
+        scoreNotes: {
+          lcb: 'LCB',
+          aime: 'AIME24',
+        },
+        verifiedSummary: 'GPQA: 62.1%, LCB: 57.2%, AIME24: 72.6%',
+        bestFor: 'Heavyweight pure reasoning distill',
+      },
+      {
+        tag: 'qwen3.6:35b-coding',
+        family: 'Qwen 3.6',
+        familyKey: 'qwen',
+        arch: '35B MoE (3B active)',
+        sizeGB: 22.0,
+        minVram: '32–48 GB VRAM',
+        vramTier: '32gb+',
+        context: '256K',
+        modalities: 'Agentic Coding, Tools',
+        tasks: ['coding'],
+        scores: {
+          lcb: null,
+          gpqa: null,
+          mmluPro: null,
+          aime: null,
+          swe: 73.4,
+        },
+        scoreNotes: {
+          swe: 'SWE-Bench Verified',
+        },
+        verifiedSummary: 'SWE-Bench Verified: 73.4%, MMLU: 87.5%',
+        bestFor: 'Elite local SWE agent for 32–48 GB setups',
+      },
+    ];
+
+    // Family Color Palette
+    const FAMILY_COLORS = {
+      gemma: { bg: 'rgba(16, 185, 129, 0.85)', border: '#34d399', badge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-400' },
+      qwen: { bg: 'rgba(56, 189, 248, 0.85)', border: '#7dd3fc', badge: 'bg-sky-500/15 text-sky-300 border-sky-500/30', dot: 'bg-sky-400' },
+      deepseek: { bg: 'rgba(168, 85, 247, 0.85)', border: '#c084fc', badge: 'bg-purple-500/15 text-purple-300 border-purple-500/30', dot: 'bg-purple-400' },
+      mistral: { bg: 'rgba(245, 158, 11, 0.85)', border: '#fbbf24', badge: 'bg-amber-500/15 text-amber-300 border-amber-500/30', dot: 'bg-amber-400' },
+      openai: { bg: 'rgba(148, 163, 184, 0.85)', border: '#cbd5e1', badge: 'bg-slate-500/15 text-slate-300 border-slate-500/30', dot: 'bg-slate-400' },
+    };
+
+    // Filter Configurations
+    const VRAM_TIERS = [
+      { id: 'all', label: 'All Tiers' },
+      { id: '8gb', label: '8 GB Tier (≤6 GB)' },
+      { id: '12-16gb', label: '12–16 GB Tier (7–14 GB)' },
+      { id: '24gb', label: '24 GB Tier (15–20 GB)' },
+      { id: '32gb+', label: '32–48 GB+ Tier (>20 GB)' },
+    ];
+
+    const TASK_FILTERS = [
+      { id: 'all', label: 'All Tasks' },
+      { id: 'coding', label: 'Coding & Agents' },
+      { id: 'reasoning', label: 'Reasoning' },
+      { id: 'multimodal', label: 'Multimodal / General' },
+    ];
+
+    const METRICS = [
+      { id: 'lcb', label: 'LiveCodeBench v6', sub: 'Coding', yMin: 30, yMax: 90 },
+      { id: 'gpqa', label: 'GPQA Diamond', sub: 'Science/Reasoning', yMin: 40, yMax: 95 },
+      { id: 'mmluPro', label: 'MMLU-Pro', sub: 'General Knowledge', yMin: 60, yMax: 95 },
+      { id: 'aime', label: 'AIME', sub: 'Math', yMin: 55, yMax: 95 },
+      { id: 'swe', label: 'SWE-Bench Verified', sub: 'Agentic Coding', yMin: 35, yMax: 85 },
+    ];
+
+    // Application State
+    const state = {
+      vram: 'all',
+      task: 'all',
+      metric: 'lcb',
+      search: '',
+    };
+
+    let scatterChartInstance = null;
+    let barChartInstance = null;
+    let toastTimeout = null;
+
+    /**
+     * Custom Chart.js plugin to draw vertical VRAM ceiling reference lines
+     * at 6 GB (8 GB VRAM), 14 GB (16 GB VRAM), and 20 GB (24 GB VRAM).
+     */
+    const vramCeilingPlugin = {
+      id: 'vramCeilingLines',
+      beforeDatasetsDraw(chart) {
+        const { ctx, chartArea, scales } = chart;
+        if (!chartArea || !scales.x) return;
+
+        const lines = [
+          { x: 6, label: '8 GB VRAM', color: 'rgba(52, 211, 153, 0.45)', textColor: '#6ee7b7' },
+          { x: 14, label: '16 GB VRAM', color: 'rgba(56, 189, 248, 0.45)', textColor: '#7dd3fc' },
+          { x: 20, label: '24 GB VRAM', color: 'rgba(251, 191, 36, 0.45)', textColor: '#fcd34d' },
+        ];
+
+        ctx.save();
+        lines.forEach((line) => {
+          const xPos = scales.x.getPixelForValue(line.x);
+          if (xPos < chartArea.left || xPos > chartArea.right) return;
+
+          // Dashed vertical reference line
+          ctx.beginPath();
+          ctx.setLineDash([5, 5]);
+          ctx.lineWidth = 1.25;
+          ctx.strokeStyle = line.color;
+          ctx.moveTo(xPos, chartArea.top);
+          ctx.lineTo(xPos, chartArea.bottom);
+          ctx.stroke();
+
+          // Top label pill
+          ctx.setLineDash([]);
+          ctx.font = '600 10px Inter, sans-serif';
+          const textWidth = ctx.measureText(line.label).width;
+          const padX = 6;
+          const boxW = textWidth + padX * 2;
+          const boxH = 18;
+          const boxX = Math.min(Math.max(xPos - boxW / 2, chartArea.left + 2), chartArea.right - boxW - 2);
+          const boxY = chartArea.top + 6;
+
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+          ctx.beginPath();
+          ctx.roundRect(boxX, boxY, boxW, boxH, 5);
+          ctx.fill();
+          ctx.strokeStyle = line.color;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+
+          ctx.fillStyle = line.textColor;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(line.label, boxX + boxW / 2, boxY + boxH / 2 + 0.5);
+        });
+        ctx.restore();
+      },
+    };
+
+    /**
+     * Filter models based on current VRAM tier, Task, and Search query.
+     */
+    function getFilteredModels(includeSearch = true) {
+      return MODELS.filter((m) => {
+        const matchVram = state.vram === 'all' || m.vramTier === state.vram;
+        const matchTask = state.task === 'all' || m.tasks.includes(state.task);
+        if (!matchVram || !matchTask) return false;
+
+        if (includeSearch && state.search.trim() !== '') {
+          const q = state.search.trim().toLowerCase();
+          const haystack = `${m.tag} ${m.family} ${m.arch} ${m.modalities} ${m.bestFor} ${m.verifiedSummary}`.toLowerCase();
+          return haystack.includes(q);
+        }
+        return true;
+      });
+    }
+
+    /**
+     * Render VRAM and Task filter pill bars.
+     */
+    function renderFilterBars() {
+      const vramContainer = document.getElementById('vram-filter-bar');
+      vramContainer.innerHTML = VRAM_TIERS.map((tier) => {
+        const active = state.vram === tier.id;
+        return `
+          <button
+            type="button"
+            onclick="setVramFilter('${tier.id}')"
+            class="px-3.5 py-2 rounded-xl text-xs font-medium border transition-all ${
+              active
+                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-400/60 shadow-sm shadow-emerald-500/10'
+                : 'bg-slate-950/70 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+            }"
+          >
+            ${tier.label}
+          </button>
+        `;
+      }).join('');
+
+      const taskContainer = document.getElementById('task-filter-bar');
+      taskContainer.innerHTML = TASK_FILTERS.map((task) => {
+        const active = state.task === task.id;
+        return `
+          <button
+            type="button"
+            onclick="setTaskFilter('${task.id}')"
+            class="px-3.5 py-2 rounded-xl text-xs font-medium border transition-all ${
+              active
+                ? 'bg-sky-500/20 text-sky-200 border-sky-400/60 shadow-sm shadow-sky-500/10'
+                : 'bg-slate-950/70 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white'
+            }"
+          >
+            ${task.label}
+          </button>
+        `;
+      }).join('');
+    }
+
+    /**
+     * Render Metric switcher tabs for Chart 1.
+     */
+    function renderMetricTabs() {
+      const container = document.getElementById('metric-tabs');
+      container.innerHTML = METRICS.map((m) => {
+        const active = state.metric === m.id;
+        return `
+          <button
+            type="button"
+            role="tab"
+            aria-selected="${active}"
+            onclick="setMetric('${m.id}')"
+            class="flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 ${
+              active
+                ? 'bg-slate-800 text-white shadow border border-slate-700'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/80 border border-transparent'
+            }"
+          >
+            <span>${m.label}</span>
+            <span class="hidden md:inline text-[11px] font-normal ${active ? 'text-sky-300' : 'text-slate-500'}">(${m.sub})</span>
+          </button>
+        `;
+      }).join('');
+
+      const activeMetric = METRICS.find((m) => m.id === state.metric);
+      document.getElementById('scatter-metric-badge').textContent = `${activeMetric.label} (${activeMetric.sub})`;
+    }
+
+    /**
+     * Build or update Chart 1: Performance vs. Download Size (Scatter / Bubble).
+     */
+    function renderScatterChart() {
+      const metricConfig = METRICS.find((m) => m.id === state.metric);
+      // Respect VRAM and Task filters; omit null scores cleanly
+      const filtered = getFilteredModels(false).filter((m) => m.scores[state.metric] !== null);
+
+      const emptyOverlay = document.getElementById('scatter-empty');
+      if (filtered.length === 0) {
+        emptyOverlay.classList.remove('hidden');
+      } else {
+        emptyOverlay.classList.add('hidden');
+      }
+
+      // Group points by family for clean Chart.js datasets
+      const families = [
+        { key: 'gemma', label: 'Gemma 4' },
+        { key: 'qwen', label: 'Qwen 3 / 3.6 / 3.8' },
+        { key: 'deepseek', label: 'DeepSeek R1' },
+        { key: 'mistral', label: 'Mistral Devstral' },
+      ];
+
+      const datasets = families
+        .map((fam) => {
+          const points = filtered
+            .filter((m) => m.familyKey === fam.key)
+            .map((m) => ({
+              x: m.sizeGB,
+              y: m.scores[state.metric],
+              r: m.arch.includes('MoE') ? 9.5 : 8.5,
+              model: m,
+            }));
+
+          if (points.length === 0) return null;
+          const palette = FAMILY_COLORS[fam.key];
+          return {
+            label: fam.label,
+            data: points,
+            backgroundColor: palette.bg,
+            borderColor: palette.border,
+            borderWidth: 2,
+            hoverRadius: 12,
+            hoverBorderWidth: 2.5,
+          };
+        })
+        .filter(Boolean);
+
+      const ctx = document.getElementById('scatterChart').getContext('2d');
+
+      if (scatterChartInstance) {
+        scatterChartInstance.destroy();
+      }
+
+      scatterChartInstance = new Chart(ctx, {
+        type: 'bubble',
+        data: { datasets },
+        plugins: [vramCeilingPlugin],
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 350 },
+          layout: { padding: { top: 28, right: 16, bottom: 4, left: 4 } },
+          scales: {
+            x: {
+              type: 'linear',
+              min: 0,
+              max: 26,
+              ticks: {
+                stepSize: 2,
+                color: '#94a3b8',
+                font: { size: 11, family: 'Inter' },
+                callback: (v) => `${v} GB`,
+              },
+              grid: { color: 'rgba(148, 163, 184, 0.08)' },
+              title: {
+                display: true,
+                text: 'Download Size in GB (Q4_K_M / MXFP4)',
+                color: '#cbd5e1',
+                font: { size: 12, weight: '600', family: 'Inter' },
+                padding: { top: 8 },
+              },
+            },
+            y: {
+              min: metricConfig.yMin,
+              max: metricConfig.yMax,
+              ticks: {
+                color: '#94a3b8',
+                font: { size: 11, family: 'Inter' },
+                callback: (v) => `${v}%`,
+              },
+              grid: { color: 'rgba(148, 163, 184, 0.08)' },
+              title: {
+                display: true,
+                text: `${metricConfig.label} Score (%)`,
+                color: '#cbd5e1',
+                font: { size: 12, weight: '600', family: 'Inter' },
+                padding: { bottom: 8 },
+              },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.96)',
+              borderColor: 'rgba(148, 163, 184, 0.25)',
+              borderWidth: 1,
+              padding: 12,
+              cornerRadius: 10,
+              titleFont: { size: 13, weight: '700', family: 'JetBrains Mono' },
+              bodyFont: { size: 12, family: 'Inter' },
+              displayColors: true,
+              callbacks: {
+                title(items) {
+                  const m = items[0].raw.model;
+                  return m.tag;
+                },
+                label(item) {
+                  const m = item.raw.model;
+                  const note = m.scoreNotes[state.metric] ? ` (${m.scoreNotes[state.metric]})` : '';
+                  return [
+                    ` Score: ${item.raw.y.toFixed(1)}%${note}`,
+                    ` Size: ${m.sizeGB.toFixed(1)} GB (${m.minVram})`,
+                    ` Arch: ${m.arch}`,
+                    ` Context: ${m.context}`,
+                  ];
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    /**
+     * Build Chart 2: Multi-Benchmark Tier Jump (Grouped Bar Chart).
+     */
+    function renderBarChart() {
+      const tierJumpData = [
+        { label: ['gemma4:e4b', '(5.2 GB)'], mmlu: 69.4, gpqa: null, lcb: 52.0 },
+        { label: ['qwen3:8b', '(5.2 GB)'], mmlu: 72.1, gpqa: 59.7, lcb: 50.1 },
+        { label: ['gemma4:12b', '(7.6 GB)'], mmlu: 77.2, gpqa: 78.8, lcb: 72.0 },
+        { label: ['deepseek-r1:14b', '(9.0 GB)'], mmlu: null, gpqa: 59.1, lcb: 53.1 },
+        { label: ['gemma4:26b', '(MoE, 16 GB)'], mmlu: 82.6, gpqa: 82.3, lcb: 77.1 },
+        { label: ['deepseek-r1:32b', '(20 GB)'], mmlu: null, gpqa: 62.1, lcb: 57.2 },
+        { label: ['gemma4:31b', '(20 GB)'], mmlu: 85.2, gpqa: 84.3, lcb: 80.0 },
+      ];
+
+      const ctx = document.getElementById('barChart').getContext('2d');
+      if (barChartInstance) {
+        barChartInstance.destroy();
+      }
+
+      barChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: tierJumpData.map((d) => d.label),
+          datasets: [
+            {
+              label: 'MMLU-Pro',
+              data: tierJumpData.map((d) => d.mmlu),
+              backgroundColor: 'rgba(16, 185, 129, 0.82)',
+              borderColor: '#34d399',
+              borderWidth: 1,
+              borderRadius: 6,
+              maxBarThickness: 28,
+            },
+            {
+              label: 'GPQA Diamond',
+              data: tierJumpData.map((d) => d.gpqa),
+              backgroundColor: 'rgba(56, 189, 248, 0.82)',
+              borderColor: '#7dd3fc',
+              borderWidth: 1,
+              borderRadius: 6,
+              maxBarThickness: 28,
+            },
+            {
+              label: 'LiveCodeBench v6',
+              data: tierJumpData.map((d) => d.lcb),
+              backgroundColor: 'rgba(168, 85, 247, 0.82)',
+              borderColor: '#c084fc',
+              borderWidth: 1,
+              borderRadius: 6,
+              maxBarThickness: 28,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: {
+            x: {
+              ticks: {
+                color: '#cbd5e1',
+                font: { size: 11, family: 'Inter' },
+              },
+              grid: { display: false },
+            },
+            y: {
+              min: 30,
+              max: 95,
+              ticks: {
+                color: '#94a3b8',
+                font: { size: 11, family: 'Inter' },
+                callback: (v) => `${v}%`,
+              },
+              grid: { color: 'rgba(148, 163, 184, 0.08)' },
+              title: {
+                display: true,
+                text: 'Benchmark Score (%)',
+                color: '#cbd5e1',
+                font: { size: 12, weight: '600', family: 'Inter' },
+              },
+            },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: 'rgba(15, 23, 42, 0.96)',
+              borderColor: 'rgba(148, 163, 184, 0.25)',
+              borderWidth: 1,
+              padding: 12,
+              cornerRadius: 10,
+              titleFont: { size: 12, weight: '700', family: 'JetBrains Mono' },
+              bodyFont: { size: 12, family: 'Inter' },
+              callbacks: {
+                title(items) {
+                  return items[0].label.replace(',', ' ');
+                },
+                label(ctx) {
+                  if (ctx.raw === null || ctx.raw === undefined) {
+                    return ` ${ctx.dataset.label}: — (unpublished)`;
+                  }
+                  return ` ${ctx.dataset.label}: ${ctx.raw.toFixed(1)}%`;
+                },
+              },
+            },
+          },
+        },
+      });
+    }
+
+    /**
+     * Render Detailed Model Table with copyable ollama pull buttons.
+     */
+    function renderTable() {
+      const filtered = getFilteredModels(true);
+      const tbody = document.getElementById('model-table-body');
+      const emptyEl = document.getElementById('table-empty');
+      document.getElementById('visible-count').textContent = `${filtered.length} / ${MODELS.length}`;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = '';
+        emptyEl.classList.remove('hidden');
+        return;
+      }
+
+      emptyEl.classList.add('hidden');
+      tbody.innerHTML = filtered
+        .map((m) => {
+          const palette = FAMILY_COLORS[m.familyKey] || FAMILY_COLORS.openai;
+          const pullCmd = `ollama pull ${m.tag}`;
+          const isMoE = m.arch.includes('MoE');
+
+          return `
+            <tr class="hover:bg-slate-800/40 transition-colors group">
+              <!-- Model Tag & Copyable Pull Command -->
+              <td class="py-3.5 px-4 align-top">
+                <div class="flex flex-col gap-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full ${palette.dot} shrink-0"></span>
+                    <span class="font-mono font-semibold text-white text-xs sm:text-sm">${m.tag}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onclick="copyCommand('${pullCmd}', this)"
+                    class="inline-flex items-center gap-1.5 w-fit px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-sky-500/40 text-[11px] font-mono text-slate-300 hover:text-sky-300 transition-all"
+                    title="Copy ${pullCmd}"
+                  >
+                    <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span>ollama pull ${m.tag}</span>
+                  </button>
+                </div>
+              </td>
+
+              <!-- Family & Arch -->
+              <td class="py-3.5 px-4 align-top">
+                <div class="space-y-1">
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold border ${palette.badge}">
+                    ${m.family}
+                  </span>
+                  <div class="text-xs text-slate-300 flex items-center gap-1.5">
+                    <span>${m.arch}</span>
+                    ${isMoE ? '<span class="px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[10px] font-semibold">MoE</span>' : ''}
+                  </div>
+                </div>
+              </td>
+
+              <!-- Q4 Size & Min VRAM -->
+              <td class="py-3.5 px-4 align-top tabular-nums">
+                <div class="font-semibold text-white text-sm">${m.sizeGB.toFixed(1)} GB</div>
+                <div class="text-xs text-slate-400">${m.minVram}</div>
+              </td>
+
+              <!-- Context Window -->
+              <td class="py-3.5 px-4 align-top tabular-nums">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-950 border border-slate-800 text-xs font-mono text-slate-300">
+                  ${m.context}
+                </span>
+              </td>
+
+              <!-- Modalities / Features -->
+              <td class="py-3.5 px-4 align-top text-xs text-slate-300 max-w-[180px]">
+                ${m.modalities}
+              </td>
+
+              <!-- Verified Benchmarks -->
+              <td class="py-3.5 px-4 align-top text-xs text-slate-200 max-w-[230px] leading-relaxed">
+                ${
+                  m.verifiedSummary.startsWith('—')
+                    ? `<span class="text-slate-500">${m.verifiedSummary}</span>`
+                    : `<span class="font-medium">${m.verifiedSummary}</span>`
+                }
+              </td>
+
+              <!-- Best For -->
+              <td class="py-3.5 px-4 align-top text-xs text-slate-300 max-w-[210px] leading-relaxed">
+                ${m.bestFor}
+              </td>
+            </tr>
+          `;
+        })
+        .join('');
+    }
+
+    /**
+     * State mutators & global update
+     */
+    function setVramFilter(tierId) {
+      state.vram = tierId;
+      updateDashboard();
+    }
+
+    function setTaskFilter(taskId) {
+      state.task = taskId;
+      updateDashboard();
+    }
+
+    function setMetric(metricId) {
+      state.metric = metricId;
+      renderMetricTabs();
+      renderScatterChart();
+    }
+
+    function resetAllFilters() {
+      state.vram = 'all';
+      state.task = 'all';
+      state.search = '';
+      document.getElementById('model-search').value = '';
+      updateDashboard();
+    }
+
+    function updateDashboard() {
+      renderFilterBars();
+      renderScatterChart();
+      renderTable();
+    }
+
+    /**
+     * Copy text reliably inside sandboxed iframes using document.execCommand('copy').
+     */
+    function copyCommand(text, btnEl) {
+      try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+
+        showToast(`Copied: ${text}`);
+
+        if (btnEl) {
+          const originalHTML = btnEl.innerHTML;
+          btnEl.classList.add('border-emerald-500/50', 'text-emerald-300');
+          setTimeout(() => {
+            btnEl.classList.remove('border-emerald-500/50', 'text-emerald-300');
+          }, 900);
+        }
+      } catch (err) {
+        showToast('Could not copy automatically. Please copy manually.');
+      }
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      const msgEl = document.getElementById('toast-message');
+      msgEl.textContent = message;
+      toast.classList.remove('opacity-0', 'translate-y-4');
+      toast.classList.add('opacity-100', 'translate-y-0');
+
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-4');
+        toast.classList.remove('opacity-100', 'translate-y-0');
+      }, 2200);
+    }
+
+    // Event Listeners & Initialization
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('reset-filters-btn').addEventListener('click', resetAllFilters);
+      document.getElementById('model-search').addEventListener('input', (e) => {
+        state.search = e.target.value;
+        renderTable();
+      });
+
+      renderFilterBars();
+      renderMetricTabs();
+      renderScatterChart();
+      renderBarChart();
+      renderTable();
+    });
+  </script>
+</body>
+</html>
